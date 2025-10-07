@@ -11,11 +11,10 @@ from flood_filter import build_fused_score
 from heatmap_vis import save_heatmap_standalone, save_heatmap_overlay
 
 def run_one(pre_path, post_path, args, out_prefix="result"):
-    # I/O folders
-    os.makedirs(args.out_masks, exist_ok=True)
+    # I/O folders (raw prob, heatmap, overlay)
+    os.makedirs(args.out_rawprob, exist_ok=True)
     os.makedirs(args.out_heatmaps, exist_ok=True)
     os.makedirs(args.out_heatmap_overlays, exist_ok=True)
-    os.makedirs(args.out_debug, exist_ok=True)
 
     # Load tensors
     pre_pil,  pre_t  = load_tensor_rgb(pre_path,  args.size)
@@ -25,6 +24,7 @@ def run_one(pre_path, post_path, args, out_prefix="result"):
     model  = SiameseUNetResNet50(out_ch=1).to(device).eval()
 
     with torch.no_grad():
+        # Raw model change probability (decoder output)
         prob_ = model(pre_t.to(device), post_t.to(device)).squeeze().cpu().numpy()  # [S,S] in [0,1]
 
     # Prepare fused heat score at SAME resolution as tensors (args.size)
@@ -43,24 +43,12 @@ def run_one(pre_path, post_path, args, out_prefix="result"):
     H0, W0 = post_bgr_full.shape[:2]
     score_full = cv2.resize(score, (W0, H0), interpolation=cv2.INTER_LINEAR)
 
-    # Binary masks
-    thr_heat = float(np.percentile(score, args.bin_percentile))
-    mask_heat = (score > thr_heat).astype(np.uint8)*255
-    mask_heat_full = cv2.resize(mask_heat, (W0, H0), interpolation=cv2.INTER_NEAREST)
-
-    mask_model = (prob_ > args.model_thresh).astype(np.uint8)*255
-    mask_model_full = cv2.resize(mask_model, (W0, H0), interpolation=cv2.INTER_NEAREST)
-
-    # Save masks
-    cv2.imwrite(os.path.join(args.out_masks, f"{out_prefix}_flood_mask.png"), mask_heat_full)
-    cv2.imwrite(os.path.join(args.out_masks, f"{out_prefix}_flood_mask_model.png"), mask_model_full)
-
     # Heatmaps (standalone + overlay)
     save_heatmap_standalone(score_full, os.path.join(args.out_heatmaps, f"{out_prefix}_heatmap.png"))
     save_heatmap_overlay(post_bgr_full, score_full, os.path.join(args.out_heatmap_overlays, f"{out_prefix}_heatmap_overlay.png"), alpha=args.overlay_alpha)
 
-    # Debug: save raw prob resized
-    cv2.imwrite(os.path.join(args.out_debug, f"{out_prefix}_change_prob.png"),
+    # Raw model change probability (resized to original)
+    cv2.imwrite(os.path.join(args.out_rawprob, f"{out_prefix}_change_prob.png"),
                 (cv2.resize(prob_, (W0, H0))*255).astype(np.uint8))
 
 def main(args):
@@ -86,15 +74,13 @@ if __name__ == "__main__":
     ap.add_argument("--pre_suffix", default="_pre")
     ap.add_argument("--post_suffix", default="_post")
 
-    # Output
-    ap.add_argument("--out_masks", default="output/masks")
+    # Output (raw prob, heatmap, heatmap overlay)
+    ap.add_argument("--out_rawprob", default="output/raw_prob")
     ap.add_argument("--out_heatmaps", default="output/heatmaps")
     ap.add_argument("--out_heatmap_overlays", default="output/heatmap_overlays")
-    ap.add_argument("--out_debug", default="output/debug")
 
     # Model / processing
     ap.add_argument("--size", type=int, default=256)
-    ap.add_argument("--model_thresh", type=float, default=0.5)
     ap.add_argument("--cpu", action="store_true")
 
     # Fusion weights
@@ -109,9 +95,6 @@ if __name__ == "__main__":
     ap.add_argument("--p_low", type=float, default=2.0)
     ap.add_argument("--p_high", type=float, default=98.0)
     ap.add_argument("--gamma", type=float, default=0.6)
-
-    # Binary mask from fused score
-    ap.add_argument("--bin_percentile", type=float, default=80.0)
 
     # Overlay
     ap.add_argument("--overlay_alpha", type=float, default=0.45)
