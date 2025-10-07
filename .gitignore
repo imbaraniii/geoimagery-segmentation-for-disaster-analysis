@@ -2,3 +2,7 @@ data/
 output/
 env/
 __pycache__/
+post/
+pre/
+predic/
+ee/
